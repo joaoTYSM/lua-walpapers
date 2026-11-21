@@ -1,0 +1,11 @@
+<!DOCTYPE html><meta charset=utf-8><title>Matrix Rain</title><style>html,body{margin:0;height:100%;background:#000;overflow:hidden}canvas{display:block;width:100%;height:100%}</style><canvas id=c></canvas><script>
+var c=document.getElementById('c'),x=c.getContext('2d'),W,H,P={speed:1,color:'#3dff8a'},M={x:.5,y:.5},t=0;
+function R(){W=c.width=innerWidth;H=c.height=innerHeight}R();addEventListener('resize',R);
+addEventListener('mousemove',function(e){M.x=e.clientX/W;M.y=e.clientY/H});
+function wallpaperProperty(n,v){P[n]=v}
+var cs='01アイウエオカキクケコサシスセソ',F=18,col=[];
+function init(){col=[];for(var i=0;i<W/F;i++)col.push(Math.random()*H/F)}init();addEventListener('resize',init);
+(function f(){x.fillStyle='rgba(0,0,0,.08)';x.fillRect(0,0,W,H);x.font=F+'px monospace';
+for(var i=0;i<col.length;i++){x.fillStyle='#fff';x.fillText(cs[Math.random()*cs.length|0],i*F,col[i]*F);x.fillStyle=P.color;x.fillText(cs[Math.random()*cs.length|0],i*F,(col[i]-1)*F);
+col[i]+=.5*P.speed;if(col[i]*F>H&&Math.random()>.975)col[i]=0}requestAnimationFrame(f)})();
+</script>
