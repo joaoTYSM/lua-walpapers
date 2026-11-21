@@ -81,8 +81,7 @@ static class Store
 
     static string PropsPath(string d)
     {
-        string a = Path.Combine(d, "Properties.json");
-        return File.Exists(a) ? a : Path.Combine(d, "properties.json");
+        return Path.Combine(d, "properties.json");
     }
 
     public static List<object> List()
@@ -96,7 +95,7 @@ static class Store
             if (m.Count == 0) continue;
             string th = Str(m, "thumb");
             Dictionary<string, object> it = new Dictionary<string, object>();
-            it["id"] = id;
+            it["id"] = id; it["locked"] = id.StartsWith("default-");
             it["name"] = Str(m, "name") ?? id;
             it["kind"] = Str(m, "kind") ?? "web";
             it["lua"] = Str(m, "lua") != null;
@@ -150,7 +149,7 @@ static class Store
             if (e == ".luac" || e == ".dll") throw new Exception("Compiled Lua is not accepted");
             if (e == ".lua" && Obfuscated(File.ReadAllText(f))) throw new Exception("Obfuscated Lua rejected: " + Path.GetFileName(f));
         }
-        Dictionary<string, object> info = Read(Path.Combine(root, "Info.json"));
+        Dictionary<string, object> info = Read(Path.Combine(root, "info.json"));
         string entry = null, kind = "web", thumb = null;
         bool tv = false;
         if (File.Exists(Path.Combine(root, "index.html"))) entry = "index.html";
@@ -158,6 +157,12 @@ static class Store
         {
             string[] h = Directory.GetFiles(root, "*.htm*");
             if (h.Length > 0) entry = Path.GetFileName(h[0]);
+        }
+        if (entry == null && !all.Any(f => IsMedia(Path.GetExtension(f).ToLowerInvariant())) && all.Any(f => f.EndsWith(".lua", StringComparison.OrdinalIgnoreCase)))
+        {
+            File.WriteAllText(Path.Combine(root, "index.html"), "<!DOCTYPE html><meta charset=utf-8><style>html,body{margin:0;height:100%;background:#05060d;color:#7dffb0;font:16px/1.5 Consolas,monospace;overflow:hidden}#o{position:absolute;left:32px;right:32px;bottom:32px;white-space:pre-wrap}</style><div id=o></div><script>var L=[];window.luaMsg=function(d){L.push(typeof d=='string'?d:JSON.stringify(d));if(L.length>40)L.shift();document.getElementById('o').textContent=L.join('\\n')}</script>");
+            entry = "index.html";
+            kind = "lua";
         }
         if (entry == null)
         {
@@ -261,7 +266,7 @@ static class Store
     public static void Remove(string id)
     {
         string d = Path.Combine(Lib, id);
-        if (Directory.Exists(d) && Path.GetFullPath(d).StartsWith(Lib)) Directory.Delete(d, true);
+        if (Directory.Exists(d) && !id.StartsWith("default-") && Path.GetFullPath(d).StartsWith(Lib)) Directory.Delete(d, true);
     }
 
     public static void SyncDefaults()
@@ -273,7 +278,7 @@ static class Store
         foreach (string p in Directory.GetFileSystemEntries(Defaults))
         {
             string n = Path.GetFileName(p);
-            if (done.Contains(n)) continue;
+            if (done.Contains(n) && File.Exists(Path.Combine(Lib, "default-" + Slug(Path.GetFileNameWithoutExtension(n)), "wallpaper.json")) && (!Directory.Exists(Path.Combine(p, "")) || File.Exists(Path.Combine(Lib, "default-" + Slug(Path.GetFileNameWithoutExtension(n)), "properties.json")))) continue;
             try { ImportPath(p, "default-" + Slug(Path.GetFileNameWithoutExtension(n))); } catch { }
             done.Add(n);
         }
@@ -443,7 +448,7 @@ class WallpaperForm : Form
     {
         if (cur == null) return;
         string d = Path.Combine(Store.Lib, cur);
-        Dictionary<string, object> props = Store.Read(File.Exists(Path.Combine(d, "Properties.json")) ? Path.Combine(d, "Properties.json") : Path.Combine(d, "properties.json"));
+        Dictionary<string, object> props = Store.Read(File.Exists(Path.Combine(d, "properties.json")) ? Path.Combine(d, "properties.json") : Path.Combine(d, "properties.json"));
         Dictionary<string, object> vals = Store.Read(Path.Combine(d, "settings.json"));
         foreach (KeyValuePair<string, object> kv in props)
         {
@@ -458,7 +463,7 @@ class WallpaperForm : Form
     public void Push(string name, object val)
     {
         if (!ready || web.CoreWebView2 == null) return;
-        web.CoreWebView2.ExecuteScriptAsync("if(window.PropertyListener)PropertyListener(" + J.To(name) + "," + J.To(val) + ");");
+        web.CoreWebView2.ExecuteScriptAsync("if(window.wallpaperProperty)wallpaperProperty(" + J.To(name) + "," + J.To(val) + ");");
     }
 
     void StartLua(string d, Dictionary<string, object> m)
@@ -529,7 +534,7 @@ class WallpaperForm : Form
         double energy = 0;
         for (int n = 0; n < N; n++) energy += ring[n] * ring[n];
         bool silent = Math.Sqrt(energy / N) < 0.0004;
-        StringBuilder sb = new StringBuilder("(function(a){if(window.hostAudio)hostAudio(a);else if(window.livelyAudioListener)livelyAudioListener(a);})([");
+        StringBuilder sb = new StringBuilder("(function(a){if(window.hostAudio)hostAudio(a);})([");
         for (int k = 0; k < BINS; k++)
         {
             double v = 0;
@@ -651,6 +656,7 @@ class PanelForm : Form
         }
         else if (cmd == "remove")
         {
+            if (id.StartsWith("default-")) { SendList(); return; }
             if (Wall.Active == id) Wall.Stop();
             Store.Remove(id);
             SendList();
