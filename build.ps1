@@ -1,12 +1,13 @@
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
 foreach ($need in 'Program.cs','panel.html','defaults','icon.ico') { if (-not (Test-Path (Join-Path $root $need))) { Write-Host "Missing $need next to build.ps1. Extract the whole zip and run build.bat from that folder." -ForegroundColor Red; exit 1 } }
+Get-Process lua_walpapers -ErrorAction SilentlyContinue | Stop-Process -Force
 $work = Join-Path $root 'work'
 $dist = Join-Path $root 'dist'
 New-Item -ItemType Directory -Force $work, $dist | Out-Null
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
-$pkgs = @(@('Microsoft.Web.WebView2', '1.0.2792.45'), @('NAudio.Core', '2.2.1'), @('NAudio.Wasapi', '2.2.1'))
+$pkgs = @(@('Microsoft.Web.WebView2', '1.0.2792.45'), @('NAudio.Core', '2.2.1'), @('NAudio.Wasapi', '2.2.1'), @('MoonSharp', '2.0.0.0'))
 foreach ($p in $pkgs) {
     $dir = Join-Path $work $p[0]
     if (-not (Test-Path $dir)) {
@@ -18,7 +19,7 @@ foreach ($p in $pkgs) {
 
 function Pick($pkg, $name) {
     $c = Get-ChildItem (Join-Path $work $pkg) -Recurse -Filter $name | Where-Object { $_.FullName -match '\\lib\\' }
-    foreach ($t in 'net472', 'net48', 'net462', 'netstandard2.0') {
+    foreach ($t in 'net472', 'net48', 'net462', 'netstandard2.0', 'net40-client', 'net40', 'net35-client') {
         $m = $c | Where-Object { $_.FullName -match ('\\' + [regex]::Escape($t) + '\\') } | Select-Object -First 1
         if ($m) { return $m.FullName }
     }
@@ -29,11 +30,12 @@ Copy-Item (Pick 'Microsoft.Web.WebView2' 'Microsoft.Web.WebView2.Core.dll') $dis
 Copy-Item (Pick 'Microsoft.Web.WebView2' 'Microsoft.Web.WebView2.WinForms.dll') $dist -Force
 Copy-Item (Pick 'NAudio.Core' 'NAudio.Core.dll') $dist -Force
 Copy-Item (Pick 'NAudio.Wasapi' 'NAudio.Wasapi.dll') $dist -Force
+Copy-Item (Pick 'MoonSharp' 'MoonSharp.Interpreter.dll') $dist -Force
 $loader = Get-ChildItem (Join-Path $work 'Microsoft.Web.WebView2') -Recurse -Filter 'WebView2Loader.dll' | Where-Object { $_.FullName -match 'win-x64' } | Select-Object -First 1
 Copy-Item $loader.FullName $dist -Force
 
 $csc = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
-$refs = @('Microsoft.Web.WebView2.Core.dll', 'Microsoft.Web.WebView2.WinForms.dll', 'NAudio.Core.dll', 'NAudio.Wasapi.dll') | ForEach-Object { '/r:' + (Join-Path $dist $_) }
+$refs = @('Microsoft.Web.WebView2.Core.dll', 'Microsoft.Web.WebView2.WinForms.dll', 'NAudio.Core.dll', 'NAudio.Wasapi.dll', 'MoonSharp.Interpreter.dll') | ForEach-Object { '/r:' + (Join-Path $dist $_) }
 $roots = @((Join-Path $env:WINDIR 'Microsoft.NET'), (Join-Path ${env:ProgramFiles(x86)} 'Reference Assemblies\Microsoft\Framework\.NETFramework'))
 foreach ($n in 'netstandard.dll', 'System.Runtime.dll') {
     $f = $null
