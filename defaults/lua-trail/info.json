@@ -1,0 +1,7 @@
+{
+  "AppVersion": "1.0.0.0",
+  "Title": "Lua Trail",
+  "Desc": "Pure Lua wallpaper: hold the left mouse button and drag to paint a glowing trail.",
+  "Author": "joao40i",
+  "License": "MIT"
+}
