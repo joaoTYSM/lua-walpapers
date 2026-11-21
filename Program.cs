@@ -1569,6 +1569,7 @@ static class Wv
     {
         for (int i = 0; i < 6; i++)
         {
+            bool failed = false;
             try
             {
                 await get().EnsureCoreWebView2Async(await App.Env());
@@ -1577,22 +1578,24 @@ static class Wv
             catch (Exception ex)
             {
                 Maint.Log(ex);
-                App.ResetEnv();
-                if (i >= 2) App.UseFallback();
-                await Task.Delay(1200 * (i + 1));
-                if (host.IsDisposed) return false;
-                try
-                {
-                    WebView2 old = get();
-                    WebView2 n = new WebView2();
-                    n.Dock = DockStyle.Fill;
-                    host.Controls.Remove(old);
-                    try { old.Dispose(); } catch { }
-                    host.Controls.Add(n);
-                    set(n);
-                }
-                catch { }
+                failed = true;
             }
+            if (!failed) continue;
+            App.ResetEnv();
+            if (i >= 2) App.UseFallback();
+            try { await Task.Delay(1200 * (i + 1)); } catch { }
+            if (host.IsDisposed) return false;
+            try
+            {
+                WebView2 old = get();
+                WebView2 n = new WebView2();
+                n.Dock = DockStyle.Fill;
+                host.Controls.Remove(old);
+                try { old.Dispose(); } catch { }
+                host.Controls.Add(n);
+                set(n);
+            }
+            catch { }
         }
         return false;
     }
