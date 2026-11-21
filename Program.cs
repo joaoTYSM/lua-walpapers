@@ -81,7 +81,7 @@ static class Store
 
     static string PropsPath(string d)
     {
-        string a = Path.Combine(d, "LivelyProperties.json");
+        string a = Path.Combine(d, "Properties.json");
         return File.Exists(a) ? a : Path.Combine(d, "properties.json");
     }
 
@@ -150,7 +150,7 @@ static class Store
             if (e == ".luac" || e == ".dll") throw new Exception("Compiled Lua is not accepted");
             if (e == ".lua" && Obfuscated(File.ReadAllText(f))) throw new Exception("Obfuscated Lua rejected: " + Path.GetFileName(f));
         }
-        Dictionary<string, object> info = Read(Path.Combine(root, "LivelyInfo.json"));
+        Dictionary<string, object> info = Read(Path.Combine(root, "Info.json"));
         string entry = null, kind = "web", thumb = null;
         bool tv = false;
         if (File.Exists(Path.Combine(root, "index.html"))) entry = "index.html";
@@ -443,7 +443,7 @@ class WallpaperForm : Form
     {
         if (cur == null) return;
         string d = Path.Combine(Store.Lib, cur);
-        Dictionary<string, object> props = Store.Read(File.Exists(Path.Combine(d, "LivelyProperties.json")) ? Path.Combine(d, "LivelyProperties.json") : Path.Combine(d, "properties.json"));
+        Dictionary<string, object> props = Store.Read(File.Exists(Path.Combine(d, "Properties.json")) ? Path.Combine(d, "Properties.json") : Path.Combine(d, "properties.json"));
         Dictionary<string, object> vals = Store.Read(Path.Combine(d, "settings.json"));
         foreach (KeyValuePair<string, object> kv in props)
         {
@@ -458,7 +458,7 @@ class WallpaperForm : Form
     public void Push(string name, object val)
     {
         if (!ready || web.CoreWebView2 == null) return;
-        web.CoreWebView2.ExecuteScriptAsync("if(window.livelyPropertyListener)livelyPropertyListener(" + J.To(name) + "," + J.To(val) + ");");
+        web.CoreWebView2.ExecuteScriptAsync("if(window.PropertyListener)PropertyListener(" + J.To(name) + "," + J.To(val) + ");");
     }
 
     void StartLua(string d, Dictionary<string, object> m)
