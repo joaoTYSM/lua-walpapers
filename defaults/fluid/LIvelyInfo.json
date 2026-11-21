@@ -1,0 +1,9 @@
+{
+  "AppVersion": "1.0.0.0",
+  "Title": "Lua Fluid",
+  "Desc": "Fluid simulation that reacts to system audio bass.",
+  "Author": "",
+  "License": "",
+  "Type": 1,
+  "FileName": "index.html"
+}
