@@ -106,9 +106,9 @@ function render() {
   let h = S.items.map(it => {
     const hue = [...it.name].reduce((a, c) => a + c.charCodeAt(0), 0) % 360;
     const on = it.id === S.active;
-    const live = it.kind === 'web' && it.entry;
+    const live = (it.kind === 'web' || it.kind === 'lua') && it.entry;
     const media = live ? `<iframe class="pv" src="${it.entry}" sandbox="allow-scripts allow-same-origin" loading="lazy" tabindex="-1"></iframe>` : it.thumb ? (it.thumbVideo ? `<video src="${it.thumb}" muted loop autoplay></video>` : `<img src="${it.thumb}">`) : '';
-    return `<div class="card ${on ? 'on' : ''}"><div class="th" style="--h:${hue}">${media ? '' : esc(it.name[0].toUpperCase())}${media}<div class="tags"><span class="tag">${esc(it.kind.toUpperCase())}</span>${it.lua ? '<span class="tag">LUA</span>' : ''}${on ? '<span class="tag">ACTIVE</span>' : ''}</div></div><div class="in"><div class="nm">${esc(it.name)}</div><div class="row"><button class="btn p" data-a="apply" data-id="${it.id}">Apply</button><button class="btn" data-a="custom" data-id="${it.id}">Customize</button><button class="btn d" data-a="rm" data-id="${it.id}">&#10005;</button></div></div></div>`;
+    return `<div class="card ${on ? 'on' : ''}"><div class="th" style="--h:${hue}">${media ? '' : esc(it.name[0].toUpperCase())}${media}<div class="tags"><span class="tag">${esc(it.kind.toUpperCase())}</span>${it.lua ? '<span class="tag">LUA</span>' : ''}${on ? '<span class="tag">ACTIVE</span>' : ''}</div></div><div class="in"><div class="nm">${esc(it.name)}</div><div class="row"><button class="btn p" data-a="apply" data-id="${it.id}">Apply</button><button class="btn" data-a="custom" data-id="${it.id}">Customize</button>${it.locked ? '' : `<button class="btn d" data-a="rm" data-id="${it.id}">&#10005;</button>`}</div></div></div>`;
   }).join('');
   if (busy) h += skel(1);
   if (!S.items.length && !busy) h = '<div class="empty">No wallpapers yet. Add files, a folder or a URL.</div>';
@@ -130,7 +130,7 @@ function ctl(k, d) {
 function drawer() {
   $('#dt').textContent = cur.name;
   const keys = Object.keys(cur.props || {});
-  $('#db').innerHTML = keys.length ? keys.map(k => ctl(k, cur.props[k])).join('') : '<div style="color:var(--mut)">This wallpaper has no settings. Add a LivelyProperties.json to it to get sliders, toggles and text boxes here.</div>';
+  $('#db').innerHTML = keys.length ? keys.map(k => ctl(k, cur.props[k])).join('') : '<div style="color:var(--mut)">This wallpaper has no settings. Add a properties.json to it to get sliders, toggles and text boxes here.</div>';
   $('#dr').classList.add('o');
 }
 
