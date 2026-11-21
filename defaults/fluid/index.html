@@ -234,7 +234,7 @@ function multipleSplats(amount) {
   }
 }
 
-function livelyAudioListener(audioArray) {
+function hostAudio(audioArray) {
   if (audioArray[0] === 0 || _isSleep == true) {
     _runRandom = true;
     return;
@@ -260,14 +260,14 @@ function livelyAudioListener(audioArray) {
 
 function hostAudio(arr) {
   lastAudioAt = performance.now();
-  livelyAudioListener(arr);
+  hostAudio(arr);
 }
 
 setInterval(() => {
   if (lastAudioAt && performance.now() - lastAudioAt > 600) _runRandom = true;
 }, 300);
 
-function livelyPropertyListener(name, val) {
+function wallpaperProperty(name, val) {
   if (name === 'audioReact') _audioReact = val;
   if (name === 'sensitivity') config.SOUND_SENSITIVITY = val;
   if (name === 'curl') config.CURL = val;
@@ -276,7 +276,7 @@ function livelyPropertyListener(name, val) {
   if (name === 'colorSpeed') config.COLOR_SPEED = val;
 }
 
-function livelyWallpaperPlaybackChanged(data) {
+function wallpaperPlaybackChanged(data) {
   _isSleep = JSON.parse(data).IsPaused;
 }
 
