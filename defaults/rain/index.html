@@ -1,0 +1,12 @@
+<!DOCTYPE html><meta charset=utf-8><title>Night Rain</title><style>html,body{margin:0;height:100%;background:#000;overflow:hidden}canvas{display:block;width:100%;height:100%}</style><canvas id=c></canvas><script>
+var c=document.getElementById('c'),x=c.getContext('2d'),W,H,P={speed:1,color:'#8fb8ff'},M={x:.5,y:.5},t=0;
+function R(){W=c.width=innerWidth;H=c.height=innerHeight}R();addEventListener('resize',R);
+addEventListener('mousemove',function(e){M.x=e.clientX/W;M.y=e.clientY/H});
+function wallpaperProperty(n,v){P[n]=v}
+var Dr=[],Rp=[];for(var i=0;i<220;i++)Dr.push({x:Math.random()*W,y:Math.random()*H,l:10+Math.random()*20,v:6+Math.random()*8});
+(function f(){x.fillStyle='rgba(5,8,20,.3)';x.fillRect(0,0,W,H);x.strokeStyle=P.color;x.lineWidth=1;
+for(var d of Dr){x.globalAlpha=.55;x.beginPath();x.moveTo(d.x,d.y);x.lineTo(d.x-2,d.y+d.l);x.stroke();d.y+=d.v*P.speed;d.x-=.4*P.speed;
+if(d.y>H){Rp.push({x:d.x,y:H-Math.random()*60,r:1,a:.6});d.y=-20;d.x=Math.random()*W}}
+for(var i=Rp.length-1;i>=0;i--){var r=Rp[i];r.r+=.8;r.a-=.02;if(r.a<=0){Rp.splice(i,1);continue}x.globalAlpha=r.a;x.beginPath();x.ellipse(r.x,r.y,r.r*2,r.r*.6,0,0,7);x.stroke()}
+x.globalAlpha=1;requestAnimationFrame(f)})();
+</script>
