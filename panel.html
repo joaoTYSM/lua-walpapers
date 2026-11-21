@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>lua_walpapers</title>
+<style>
+:root{--bg:#0b0b16;--glass:rgba(255,255,255,.06);--line:rgba(255,255,255,.12);--txt:#eef0ff;--mut:#9aa0c0;--a:#b6a8ff;--b:#8fe3ff;--c:#ffb8e6}
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;background:var(--bg);color:var(--txt);font:14px/1.4 "Segoe UI Variable","Segoe UI",system-ui,sans-serif;overflow-x:hidden}
+.blob{position:fixed;width:520px;height:520px;border-radius:50%;filter:blur(110px);opacity:.35;z-index:-1;animation:f 22s ease-in-out infinite alternate}
+.b1{background:var(--a);top:-160px;left:-120px}
+.b2{background:var(--b);bottom:-200px;right:-100px;animation-delay:-8s}
+.b3{background:var(--c);top:40%;left:45%;width:380px;height:380px;animation-delay:-14s}
+@keyframes f{to{transform:translate(120px,80px) scale(1.2)}}
+header{display:flex;gap:12px;align-items:center;flex-wrap:wrap;padding:20px 32px;position:sticky;top:0;backdrop-filter:blur(18px);background:rgba(11,11,22,.55);border-bottom:1px solid var(--line);z-index:5}
+h1{margin:0 auto 0 0;font-size:22px;background:linear-gradient(90deg,var(--a),var(--b),var(--c));-webkit-background-clip:text;color:transparent}
+button,input,select{font:inherit;color:inherit}
+.btn{border:1px solid var(--line);background:var(--glass);padding:9px 16px;border-radius:12px;cursor:pointer;transition:.18s}
+.btn:hover{background:rgba(255,255,255,.14);transform:translateY(-1px)}
+.btn.p{background:linear-gradient(135deg,var(--a),var(--b));color:#14142a;border:0;font-weight:600}
+.btn.d{color:#ff9aa8}
+.url{display:flex;border:1px solid var(--line);border-radius:12px;background:var(--glass);overflow:hidden}
+.url input{background:none;border:0;outline:0;padding:9px 12px;width:290px}
+.url button{border:0;border-left:1px solid var(--line);background:none;padding:0 14px;cursor:pointer}
+main{padding:28px 32px;display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:22px}
+.card{border:1px solid var(--line);background:var(--glass);border-radius:20px;overflow:hidden;transition:.25s}
+.card:hover{transform:translateY(-4px);box-shadow:0 18px 50px rgba(0,0,0,.45)}
+.card.on{border-color:var(--a);box-shadow:0 0 0 1px var(--a),0 0 40px rgba(182,168,255,.35)}
+.th{aspect-ratio:16/9;background:linear-gradient(135deg,hsl(var(--h) 70% 55%),hsl(calc(var(--h) + 60) 70% 45%));display:grid;place-items:center;font-size:44px;font-weight:700;position:relative;overflow:hidden}
+.th img,.th video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.tags{position:absolute;top:10px;left:10px;display:flex;gap:6px;z-index:1}
+.tag{font-size:10px;padding:3px 8px;border-radius:99px;background:rgba(0,0,0,.55);letter-spacing:.8px}
+.in{padding:14px 16px}
+.nm{font-weight:600;margin-bottom:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.row{display:flex;gap:8px}
+.row .btn{flex:1;padding:8px 6px;font-size:13px}
+.sk{border-radius:20px;height:250px;background:linear-gradient(100deg,rgba(255,255,255,.04) 30%,rgba(255,255,255,.12) 50%,rgba(255,255,255,.04) 70%);background-size:300% 100%;animation:s 1.3s linear infinite}
+@keyframes s{to{background-position:-100% 0}}
+#dr{position:fixed;top:0;right:0;height:100%;width:380px;transform:translateX(105%);transition:.35s cubic-bezier(.2,.8,.2,1);background:rgba(16,16,32,.94);backdrop-filter:blur(24px);border-left:1px solid var(--line);z-index:9;display:flex;flex-direction:column}
+#dr.o{transform:none}
+#dh{padding:20px 22px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;font-weight:600;font-size:16px}
+#db{flex:1;overflow:auto;padding:18px 22px;display:flex;flex-direction:column;gap:18px}
+#df{padding:16px 22px;border-top:1px solid var(--line);display:flex;gap:8px}
+#df .btn{padding:9px 12px}
+.f label{display:flex;justify-content:space-between;color:var(--mut);margin-bottom:6px;font-size:13px}
+.f input[type=text],.f select{width:100%;padding:9px 12px;border-radius:10px;border:1px solid var(--line);background:rgba(255,255,255,.06);outline:0}
+.f select option{background:#14142a}
+.f input[type=range]{width:100%;accent-color:var(--a)}
+.f input[type=color]{width:100%;height:38px;border:0;background:none}
+.tg{display:flex;justify-content:space-between;align-items:center}
+.sw{position:relative;width:44px;height:24px;flex:none}
+.f .sw{display:block;margin:0}
+.sw input{display:none}
+.sw span{position:absolute;inset:0;border-radius:99px;background:rgba(255,255,255,.15);cursor:pointer;transition:.2s}
+.sw span:after{content:"";position:absolute;width:18px;height:18px;left:3px;top:3px;border-radius:50%;background:#fff;transition:.2s}
+.sw input:checked+span{background:linear-gradient(135deg,var(--a),var(--b))}
+.sw input:checked+span:after{transform:translateX(20px)}
+#toast{position:fixed;bottom:24px;left:50%;transform:translate(-50%,160%);background:#3a1220;border:1px solid #ff6b81;padding:12px 20px;border-radius:14px;transition:.3s;z-index:20;max-width:70%}
+#toast.o{transform:translate(-50%,0)}
+.empty{grid-column:1/-1;text-align:center;color:var(--mut);padding:80px 0}
+
+:root{--bg:#07070f;--glass:rgba(255,255,255,.05);--line:rgba(255,255,255,.1);--a:#7c8cff;--b:#4ac8ff;--c:#c084fc;--r:18px}
+body{font-family:"Inter","Segoe UI Variable Text","Segoe UI",system-ui,sans-serif;letter-spacing:.01em;-webkit-font-smoothing:antialiased}
+h1{font-weight:700;letter-spacing:-.02em;display:flex;align-items:center;gap:10px}
+h1:before{content:"";width:26px;height:26px;border-radius:50%;background:radial-gradient(circle at 70% 30%,#fff 0 12%,transparent 13%),radial-gradient(circle,#2c2d72 0 55%,#4a4cc0 56%);box-shadow:0 0 18px rgba(124,140,255,.6);-webkit-text-fill-color:initial}
+main{grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:26px}
+.card{border-radius:var(--r);background:linear-gradient(160deg,rgba(255,255,255,.08),rgba(255,255,255,.02));backdrop-filter:blur(14px);box-shadow:0 8px 30px rgba(0,0,0,.35);transition:transform .3s cubic-bezier(.2,.8,.2,1),box-shadow .3s,border-color .3s}
+.card:hover{transform:translateY(-6px) scale(1.015);box-shadow:0 24px 60px rgba(0,0,0,.55),0 0 0 1px rgba(124,140,255,.5)}
+.th{border-bottom:1px solid var(--line);background:#000}
+.th .pv{position:absolute;left:0;top:0;width:1280px;height:720px;border:0;transform-origin:0 0;pointer-events:none;background:#000}
+.th:after{content:"";position:absolute;inset:0;background:linear-gradient(180deg,transparent 60%,rgba(0,0,0,.55));pointer-events:none}
+.tags{z-index:2}
+.nm{font-weight:600;letter-spacing:-.01em}
+.btn{border-radius:10px;font-weight:500}
+.btn.p{background:linear-gradient(135deg,#7c8cff,#4ac8ff);box-shadow:0 4px 16px rgba(74,200,255,.3)}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+<div class="blob b1"></div><div class="blob b2"></div><div class="blob b3"></div>
+<header>
+<h1>lua_walpapers</h1>
+<div class="url"><input id="u" placeholder="Repo, site, .zip or media URL"><button id="ua">Add</button></div>
+<button class="btn" id="af">+ Files</button>
+<button class="btn" id="ad">+ Folder</button>
+<button class="btn" id="of">Defaults</button>
+<div class="tg" style="gap:8px;color:var(--mut)">Start with Windows<label class="sw"><input type="checkbox" id="st"><span></span></label></div>
+<button class="btn d" id="sp">Stop</button>
+</header>
+<main id="g"></main>
+<aside id="dr">
+<div id="dh"><span id="dt"></span><button class="btn" id="dx">&#10005;</button></div>
+<div id="db"></div>
+<div id="df"><button class="btn" id="rs">Reset</button><button class="btn" id="sv">Save</button><button class="btn p" id="sa">Save &amp; Apply</button></div>
+</aside>
+<div id="toast"></div>
+<script>
+const $ = s => document.querySelector(s);
+const send = o => chrome.webview.postMessage(o);
+const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+let S = { items: [], active: null }, busy = false, cur = null, vals = {};
+
+const skel = n => '<div class="sk"></div>'.repeat(n);
+
+function render() {
+  let h = S.items.map(it => {
+    const hue = [...it.name].reduce((a, c) => a + c.charCodeAt(0), 0) % 360;
+    const on = it.id === S.active;
+    const live = it.kind === 'web' && it.entry;
+    const media = live ? `<iframe class="pv" src="${it.entry}" sandbox="allow-scripts allow-same-origin" loading="lazy" tabindex="-1"></iframe>` : it.thumb ? (it.thumbVideo ? `<video src="${it.thumb}" muted loop autoplay></video>` : `<img src="${it.thumb}">`) : '';
+    return `<div class="card ${on ? 'on' : ''}"><div class="th" style="--h:${hue}">${media ? '' : esc(it.name[0].toUpperCase())}${media}<div class="tags"><span class="tag">${esc(it.kind.toUpperCase())}</span>${it.lua ? '<span class="tag">LUA</span>' : ''}${on ? '<span class="tag">ACTIVE</span>' : ''}</div></div><div class="in"><div class="nm">${esc(it.name)}</div><div class="row"><button class="btn p" data-a="apply" data-id="${it.id}">Apply</button><button class="btn" data-a="custom" data-id="${it.id}">Customize</button><button class="btn d" data-a="rm" data-id="${it.id}">&#10005;</button></div></div></div>`;
+  }).join('');
+  if (busy) h += skel(1);
+  if (!S.items.length && !busy) h = '<div class="empty">No wallpapers yet. Add files, a folder or a URL.</div>';
+  $('#g').innerHTML = h;
+}
+
+function ctl(k, d) {
+  const v = k in vals ? vals[k] : d.value, t = d.type, lab = esc(d.text || k);
+  if (t === 'label') return `<div class="f"><label>${lab}</label><div style="color:var(--mut)">${esc(d.value)}</div></div>`;
+  if (t === 'checkbox') return `<div class="f tg"><span>${lab}</span><label class="sw"><input type="checkbox" data-k="${esc(k)}" ${v ? 'checked' : ''}><span></span></label></div>`;
+  if (t === 'slider') return `<div class="f"><label>${lab}<b>${v}</b></label><input type="range" data-k="${esc(k)}" min="${d.min}" max="${d.max}" step="${d.step || 1}" value="${v}"></div>`;
+  if (t === 'textbox') return `<div class="f"><label>${lab}</label><input type="text" data-k="${esc(k)}" value="${esc(v)}"></div>`;
+  if (t === 'dropdown') return `<div class="f"><label>${lab}</label><select data-k="${esc(k)}">${(d.items || []).map((x, i) => `<option value="${i}" ${i == v ? 'selected' : ''}>${esc(x)}</option>`).join('')}</select></div>`;
+  if (t === 'color') return `<div class="f"><label>${lab}</label><input type="color" data-k="${esc(k)}" value="${esc(v)}"></div>`;
+  if (t === 'button') return `<div class="f"><button class="btn" style="width:100%" data-btn="${esc(k)}">${lab}</button></div>`;
+  return '';
+}
+
+function drawer() {
+  $('#dt').textContent = cur.name;
+  const keys = Object.keys(cur.props || {});
+  $('#db').innerHTML = keys.length ? keys.map(k => ctl(k, cur.props[k])).join('') : '<div style="color:var(--mut)">This wallpaper has no settings. Add a LivelyProperties.json to it to get sliders, toggles and text boxes here.</div>';
+  $('#dr').classList.add('o');
+}
+
+function toast(m) {
+  const t = $('#toast');
+  t.textContent = m;
+  t.classList.add('o');
+  setTimeout(() => t.classList.remove('o'), 4500);
+}
+
+$('#g').addEventListener('click', e => {
+  const b = e.target.closest('button');
+  if (!b) return;
+  const id = b.dataset.id, a = b.dataset.a;
+  if (a === 'apply') send({ cmd: 'apply', id });
+  if (a === 'rm') send({ cmd: 'remove', id });
+  if (a === 'custom') {
+    cur = S.items.find(x => x.id === id);
+    vals = Object.assign({}, cur.values);
+    drawer();
+  }
+});
+
+$('#db').addEventListener('input', e => {
+  const el = e.target, k = el.dataset.k;
+  if (!k) return;
+  let v = el.type === 'checkbox' ? el.checked : el.type === 'range' ? parseFloat(el.value) : el.tagName === 'SELECT' ? parseInt(el.value) : el.value;
+  vals[k] = v;
+  if (el.type === 'range') el.closest('.f').querySelector('b').textContent = v;
+  send({ cmd: 'live', id: cur.id, name: k, value: v });
+});
+
+$('#db').addEventListener('click', e => {
+  const b = e.target.closest('[data-btn]');
+  if (b) send({ cmd: 'live', id: cur.id, name: b.dataset.btn, value: true });
+});
+
+const save = ap => { send({ cmd: 'save', id: cur.id, values: vals, apply: ap }); $('#dr').classList.remove('o'); };
+$('#sv').onclick = () => save(false);
+$('#sa').onclick = () => save(true);
+$('#dx').onclick = () => $('#dr').classList.remove('o');
+$('#rs').onclick = () => {
+  vals = {};
+  drawer();
+  for (const k in cur.props) if (cur.props[k].type !== 'label' && cur.props[k].type !== 'button') send({ cmd: 'live', id: cur.id, name: k, value: cur.props[k].value });
+};
+$('#af').onclick = () => send({ cmd: 'addFiles' });
+$('#ad').onclick = () => send({ cmd: 'addFolder' });
+$('#of').onclick = () => send({ cmd: 'openDefaults' });
+$('#sp').onclick = () => send({ cmd: 'stop' });
+$('#st').onchange = e => send({ cmd: 'startup', on: e.target.checked });
+const addUrl = () => { const v = $('#u').value.trim(); if (v) { send({ cmd: 'addUrl', url: v }); $('#u').value = ''; } };
+$('#ua').onclick = addUrl;
+$('#u').onkeydown = e => { if (e.key === 'Enter') addUrl(); };
+
+chrome.webview.addEventListener('message', e => {
+  const m = e.data;
+  if (m.evt === 'list') { S = m; $('#st').checked = m.startup; render(); }
+  if (m.evt === 'busy') { busy = m.on; render(); }
+  if (m.evt === 'error') toast(m.msg);
+});
+
+$('#g').innerHTML = skel(6);
+send({ cmd: 'list' });
+</script>
+<script>
+(function(){const fit=()=>document.querySelectorAll('.th .pv').forEach(f=>{f.style.transform='scale('+(f.parentElement.clientWidth/1280)+')'});
+new MutationObserver(fit).observe(document.body,{childList:true,subtree:true});addEventListener('resize',fit);setInterval(fit,1500);})();
+</script>
+</body>
+</html>
