@@ -12,19 +12,25 @@ canvas{position:fixed;inset:0;width:100%;height:100%;display:block}
 <canvas id="c"></canvas>
 <script>
 const config = {
-  SIM_RESOLUTION: 128,
-  DYE_RESOLUTION: 1024,
+  SIM_RESOLUTION: 96,
+  DYE_RESOLUTION: 768,
   DENSITY_DISSIPATION: 1.1,
   VELOCITY_DISSIPATION: 0.4,
   PRESSURE: 0.8,
-  PRESSURE_ITERATIONS: 20,
+  PRESSURE_ITERATIONS: 16,
   CURL: 28,
   SPLAT_RADIUS: 0.3,
   COLOR_SPEED: 1,
   FREQ_RANGE: 12,
   FREQ_MULTI: 1,
-  SOUND_SENSITIVITY: 1
+  SOUND_SENSITIVITY: 1,
+  MOUSE_TRAIL: true,
+  HOVER_FLOW: false,
+  TRAIL_SIZE: 0.35,
+  TRAIL_POWER: 1
 };
+const QUALITY = [[64, 512], [96, 768], [128, 1024]];
+let curQuality = 1;
 
 let _isSleep = false;
 let _audioReact = true;
@@ -144,7 +150,8 @@ function dbl(w, h) {
   return {
     get read() { return a; },
     get write() { return b; },
-    swap() { const x = a; a = b; b = x; }
+    swap() { const x = a; a = b; b = x; },
+    free() { [a, b].forEach(o => { gl.deleteTexture(o.t); gl.deleteFramebuffer(o.f); }); }
   };
 }
 
@@ -157,7 +164,13 @@ function resolution(base) {
 
 let velocity, dye, pressure, divergence, curlFbo;
 
+function release() {
+  [velocity, dye, pressure].forEach(o => { if (o) o.free(); });
+  [divergence, curlFbo].forEach(o => { if (o) { gl.deleteTexture(o.t); gl.deleteFramebuffer(o.f); } });
+}
+
 function init() {
+  release();
   const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
   canvas.width = Math.floor(innerWidth * dpr);
   canvas.height = Math.floor(innerHeight * dpr);
@@ -199,10 +212,10 @@ function nextColor(k) {
   return [c[0] * k * 0.3, c[1] * k * 0.3, c[2] * k * 0.3];
 }
 
-function splat(x, y, dx, dy, c) {
+function splat(x, y, dx, dy, c, rad) {
   const p = P.splat;
   const aspect = canvas.width / canvas.height;
-  let r = config.SPLAT_RADIUS / 100;
+  let r = (rad || config.SPLAT_RADIUS) / 100;
   if (aspect > 1) r *= aspect;
   gl.useProgram(p.p);
   gl.uniform1f(p.u.aspect, aspect);
@@ -219,7 +232,6 @@ function splat(x, y, dx, dy, c) {
 }
 
 function multipleSplats(amount) {
-  lastBass = amount + lastBass;
   const n = Math.min(Math.max(Math.floor(amount), 0), 6);
   for (let i = 0; i < n; i++) {
     const a = Math.random() * Math.PI * 2;
@@ -234,7 +246,7 @@ function multipleSplats(amount) {
   }
 }
 
-function hostAudio(audioArray) {
+function onAudio(audioArray) {
   if (audioArray[0] === 0 || _isSleep == true) {
     _runRandom = true;
     return;
@@ -253,14 +265,15 @@ function hostAudio(audioArray) {
 
   bass /= config.FREQ_RANGE * 2 * config.FREQ_MULTI;
 
-  multipleSplats(
-    Math.floor(bass * config.SOUND_SENSITIVITY * 10) - lastBass
-  );
+  const level = bass * config.SOUND_SENSITIVITY * 10;
+  const hit = level - lastBass;
+  lastBass = lastBass * 0.85 + level * 0.15;
+  if (hit > 0.6) multipleSplats(Math.ceil(hit));
 }
 
 function hostAudio(arr) {
   lastAudioAt = performance.now();
-  hostAudio(arr);
+  onAudio(arr);
 }
 
 setInterval(() => {
@@ -274,6 +287,56 @@ function wallpaperProperty(name, val) {
   if (name === 'dissipation') config.DENSITY_DISSIPATION = val;
   if (name === 'splatRadius') config.SPLAT_RADIUS = val;
   if (name === 'colorSpeed') config.COLOR_SPEED = val;
+  if (name === 'mouseTrail') config.MOUSE_TRAIL = !!val;
+  if (name === 'hoverFlow') config.HOVER_FLOW = !!val;
+  if (name === 'trailSize') config.TRAIL_SIZE = val;
+  if (name === 'trailPower') config.TRAIL_POWER = val;
+  if (name === 'quality' && val !== curQuality && QUALITY[val]) {
+    curQuality = val;
+    config.SIM_RESOLUTION = QUALITY[val][0];
+    config.DYE_RESOLUTION = QUALITY[val][1];
+    init();
+  }
+}
+
+let dragging = false, tx = 0, ty = 0, trailHue = Math.random();
+
+function trailColor(k) {
+  trailHue = (trailHue + 0.006 * config.COLOR_SPEED) % 1;
+  const c = hsv(trailHue, 0.55, 1);
+  return [c[0] * k, c[1] * k, c[2] * k];
+}
+
+function trailTo(x, y) {
+  const aspect = canvas.width / canvas.height;
+  const dx = x - tx, dy = y - ty;
+  const dist = Math.hypot(dx * aspect, dy);
+  const steps = Math.min(24, Math.max(1, Math.ceil(dist / 0.012)));
+  const k = 0.75 / Math.sqrt(steps);
+  for (let i = 1; i <= steps; i++) {
+    const t = i / steps;
+    splat(tx + dx * t, ty + dy * t, dx * 4500 * config.TRAIL_POWER, dy * 4500 * config.TRAIL_POWER, trailColor(k), config.TRAIL_SIZE);
+  }
+}
+
+function hostMouse(nx, ny, ev, buttons) {
+  const x = nx, y = 1 - ny, left = (buttons & 1) === 1;
+  if (ev === 'down' && left) {
+    dragging = true;
+    tx = x;
+    ty = y;
+    if (config.MOUSE_TRAIL) splat(x, y, 0, 0, trailColor(1.1), config.TRAIL_SIZE);
+  } else if (ev === 'up' && !left) {
+    dragging = false;
+  } else if (ev === 'move') {
+    if (dragging && left) {
+      if (config.MOUSE_TRAIL) trailTo(x, y);
+    } else if (config.HOVER_FLOW && !_isSleep) {
+      splat(x, y, (x - tx) * 5000, (y - ty) * 5000, trailColor(0.5));
+    }
+    tx = x;
+    ty = y;
+  }
 }
 
 function wallpaperPlaybackChanged(data) {
@@ -377,7 +440,7 @@ function frame(now) {
 let px = null, py = 0;
 addEventListener('pointermove', e => {
   const x = e.clientX / innerWidth, y = 1 - e.clientY / innerHeight;
-  if (px !== null) splat(x, y, (x - px) * 5000, (y - py) * 5000, nextColor(0.6));
+  if (config.HOVER_FLOW && px !== null) splat(x, y, (x - px) * 5000, (y - py) * 5000, nextColor(0.6));
   px = x;
   py = y;
 });
