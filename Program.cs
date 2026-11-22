@@ -213,6 +213,7 @@ window.luaMsg=function(d){if(d&&d.gfx)return run(d.gfx);if(d&&d.print!==undefine
             it["lua"] = Str(m, "lua") != null;
             it["thumb"] = th == null ? null : "https://lib.local/" + id + "/" + Uri.EscapeUriString(th);
             it["thumbVideo"] = Str(m, "thumbVideo") == "True";
+            it["pv"] = id.StartsWith("default-") ? Remote.Raw("defaults/" + id.Substring(8) + "/p") : null;
             string en = Str(m, "entry"); it["entry"] = en == null ? null : "https://lib.local/" + id + "/" + Uri.EscapeUriString(en);
             it["props"] = Read(PropsPath(d));
             it["values"] = Read(Path.Combine(d, "settings.json"));
@@ -331,6 +332,7 @@ window.luaMsg=function(d){if(d&&d.gfx)return run(d.gfx);if(d&&d.print!==undefine
         try
         {
             if (Directory.Exists(src)) CopyDir(src, tmp);
+            if (forced != null && forced.StartsWith("default-")) foreach (string pn in new[] { "p.png", "p.gif" }) { try { File.Delete(Path.Combine(tmp, pn)); } catch { } }
             else if (src.EndsWith(".zip", StringComparison.OrdinalIgnoreCase)) ZipFile.ExtractToDirectory(src, tmp);
             else File.Copy(src, Path.Combine(tmp, Path.GetFileName(src)));
             return Finish(tmp, Path.GetFileNameWithoutExtension(src.TrimEnd('\\', '/')), forced);
@@ -409,6 +411,147 @@ window.luaMsg=function(d){if(d&&d.gfx)return run(d.gfx);if(d&&d.print!==undefine
         c["imported"] = done;
         if (Str(c, "active") == null && Directory.Exists(Path.Combine(Lib, "default-fluid")) && !c.ContainsKey("everApplied")) c["active"] = "default-fluid";
         SaveCfg(c);
+    }
+}
+
+static class Remote
+{
+    public const string Repo = "joaoTYSM/lua-walpapers";
+    public static string Branch = "main";
+    public static List<Dictionary<string, object>> Cache = new List<Dictionary<string, object>>();
+    public static DateTime Last = DateTime.MinValue;
+    static Dictionary<string, List<string>> files = new Dictionary<string, List<string>>();
+    static readonly object gate = new object();
+
+    public static string Raw(string path) { return "https://raw.githubusercontent.com/" + Repo + "/" + Branch + "/" + path; }
+    public static string LoadingUrl { get { return Raw("loading-bg.mp4"); } }
+
+    static string Get(string url)
+    {
+        ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12;
+        HttpWebRequest rq = (HttpWebRequest)WebRequest.Create(url);
+        rq.UserAgent = "lua_walpapers";
+        rq.Timeout = 15000;
+        rq.CachePolicy = new System.Net.Cache.RequestCachePolicy(System.Net.Cache.RequestCacheLevel.NoCacheNoStore);
+        using (WebResponse rs = rq.GetResponse())
+        using (StreamReader r = new StreamReader(rs.GetResponseStream(), Encoding.UTF8))
+            return r.ReadToEnd();
+    }
+
+    static string Tree()
+    {
+        Exception last = null;
+        foreach (string br in new[] { Branch, Branch == "main" ? "master" : "main" })
+        {
+            try { string t = Get("https://api.github.com/repos/" + Repo + "/git/trees/" + br + "?recursive=1"); Branch = br; return t; }
+            catch (Exception ex) { last = ex; }
+        }
+        throw last ?? new Exception("sem resposta");
+    }
+
+    // Lists the folders of /defaults in the repo that are not installed yet. Nothing is downloaded except a few KB of JSON.
+    public static void Refresh()
+    {
+        lock (gate)
+        {
+            try
+            {
+                Dictionary<string, object> o = J.Obj(Tree());
+                Dictionary<string, List<string>> f = new Dictionary<string, List<string>>();
+                foreach (object x in (IEnumerable)o["tree"])
+                {
+                    Dictionary<string, object> e = x as Dictionary<string, object>;
+                    if (e == null || Store.Str(e, "type") != "blob") continue;
+                    string path = Store.Str(e, "path");
+                    string[] pt = path.Split('/');
+                    if (pt.Length < 3 || pt[0] != "defaults") continue;
+                    if (!f.ContainsKey(pt[1])) f[pt[1]] = new List<string>();
+                    f[pt[1]].Add(path);
+                }
+                files = f;
+                List<string> ign = Store.Strs(Store.Cfg(), "ignoredRemote");
+                List<Dictionary<string, object>> r = new List<Dictionary<string, object>>();
+                foreach (KeyValuePair<string, List<string>> kv in f)
+                {
+                    string n = kv.Key;
+                    if (!Store.ValidId(n) || ign.Contains(n)) continue;
+                    if (Directory.Exists(Path.Combine(Store.Defaults, n))) continue;
+                    if (Directory.Exists(Path.Combine(Store.Lib, "default-" + Store.Slug(n)))) continue;
+                    if (!kv.Value.Any(v => { string b = v.Substring(10 + n.Length); return b != "p.png" && b != "p.gif" && b != "i"; })) continue;
+                    string title = n, desc = "";
+                    try
+                    {
+                        Dictionary<string, object> inf = J.Obj(Get(Raw("defaults/" + Uri.EscapeDataString(n) + "/info.json")));
+                        title = Store.Str(inf, "Title") ?? n;
+                        desc = Store.Str(inf, "Desc") ?? "";
+                    }
+                    catch { }
+                    Dictionary<string, object> it = new Dictionary<string, object>();
+                    it["id"] = n; it["name"] = title; it["desc"] = desc;
+                    it["pv"] = Raw("defaults/" + Uri.EscapeDataString(n) + "/p");
+                    r.Add(it);
+                }
+                Cache = r;
+                Last = DateTime.UtcNow;
+            }
+            catch (Exception ex) { Maint.Log(ex); }
+        }
+    }
+
+    public static void Ignore(string name)
+    {
+        Dictionary<string, object> c = Store.Cfg();
+        List<string> l = Store.Strs(c, "ignoredRemote");
+        if (!l.Contains(name)) l.Add(name);
+        c["ignoredRemote"] = l;
+        Store.SaveCfg(c);
+        Cache = Cache.Where(x => Store.Str(x, "id") != name).ToList();
+    }
+
+    // Downloads the wallpaper files (NOT p.png / p.gif) and installs it as a default.
+    public static string Download(string name)
+    {
+        List<string> list;
+        lock (gate) { if (!files.TryGetValue(name, out list)) { Refresh(); files.TryGetValue(name, out list); } }
+        if (list == null) throw new Exception("Default não encontrado no GitHub.");
+        string tmp = Path.Combine(Path.GetTempPath(), "lw_dl_" + Guid.NewGuid().ToString("N"));
+        string dir = Path.Combine(tmp, name);
+        Directory.CreateDirectory(dir);
+        try
+        {
+            ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12;
+            string pre = "defaults/" + name + "/";
+            foreach (string path in list)
+            {
+                string rel = path.Substring(pre.Length);
+                if (rel == "p.png" || rel == "p.gif" || rel == "i" || rel.Split('/').Contains("..")) continue;
+                string dst = Path.Combine(dir, rel.Replace('/', '\\'));
+                Directory.CreateDirectory(Path.GetDirectoryName(dst));
+                using (WebClient wc = new WebClient())
+                {
+                    wc.Headers["User-Agent"] = "lua_walpapers";
+                    wc.DownloadFile(Raw(Uri.EscapeUriString(path)), dst);
+                }
+            }
+            string id = Store.ImportPath(dir, "default-" + Store.Slug(name));
+            Cache = Cache.Where(x => Store.Str(x, "id") != name).ToList();
+            return id;
+        }
+        finally { try { Directory.Delete(tmp, true); } catch { } }
+    }
+
+    // Injected in every wallpaper page: plays loading-bg.mp4 (streamed from raw, never saved) until the page finishes loading.
+    public static string LoadingScript()
+    {
+        Dictionary<string, object> c = Store.Cfg();
+        if (c.ContainsKey("loadingVideo") && c["loadingVideo"] is bool && !(bool)c["loadingVideo"]) return "";
+        return @"(function(){if(window.top!==window||window.__lwl)return;window.__lwl=1;var U=" + J.To(LoadingUrl) + @",d=document,el,v,t=0,done=0;
+function add(){if(el||done||!d.documentElement)return;el=d.createElement('div');el.style.cssText='position:fixed;left:0;top:0;width:100%;height:100%;z-index:2147483647;background:#07070f;transition:opacity .6s;pointer-events:none';
+v=d.createElement('video');v.muted=true;v.loop=true;v.autoplay=true;v.setAttribute('playsinline','');v.style.cssText='width:100%;height:100%;object-fit:cover';
+v.onerror=function(){if(++t<8)setTimeout(function(){v.src=U+'?r='+t;v.play().catch(function(){})},3000)};v.src=U;el.appendChild(v);d.documentElement.appendChild(el)}
+function rm(){if(done)return;done=1;if(!el)return;var e=el;e.style.opacity=0;setTimeout(function(){e.remove()},700)}
+add();if(!el){var mo=new MutationObserver(function(){add();if(el)mo.disconnect()});mo.observe(d,{childList:true})}
+addEventListener('load',function(){setTimeout(rm,500)});setTimeout(rm,25000)})();";
     }
 }
 
@@ -924,7 +1067,7 @@ class WallpaperForm : Form
         FormBorderStyle = FormBorderStyle.None;
         ShowInTaskbar = false;
         StartPosition = FormStartPosition.Manual;
-        BackColor = Color.Black;
+        BackColor = Color.FromArgb(7, 7, 15);
         web.Dock = DockStyle.Fill;
         Controls.Add(web);
         watch.Interval = 1000;
@@ -998,6 +1141,7 @@ class WallpaperForm : Form
             return;
         }
         CoreWebView2 c = web.CoreWebView2;
+        try { web.DefaultBackgroundColor = Color.FromArgb(7, 7, 15); } catch { }
         c.Settings.AreDefaultContextMenusEnabled = false;
         c.Settings.AreDevToolsEnabled = false;
         c.ProcessFailed += (s, e) =>
@@ -1030,7 +1174,7 @@ class WallpaperForm : Form
         curMeta = Store.Read(Path.Combine(curDir, "wallpaper.json"));
         Dictionary<string, object> vals = Store.Read(Path.Combine(curDir, "settings.json"));
         if (scriptId != null) web.CoreWebView2.RemoveScriptToExecuteOnDocumentCreated(scriptId);
-        scriptId = await web.CoreWebView2.AddScriptToExecuteOnDocumentCreatedAsync("window.luaProps=" + J.To(vals) + ";");
+        scriptId = await web.CoreWebView2.AddScriptToExecuteOnDocumentCreatedAsync("window.luaProps=" + J.To(vals) + ";" + Remote.LoadingScript());
         if (Store.Str(curMeta, "kind") == "url") web.CoreWebView2.Navigate(Store.Str(curMeta, "url"));
         else web.CoreWebView2.Navigate("https://lib.local/" + id + "/" + Uri.EscapeUriString(Store.Str(curMeta, "entry") ?? "index.html"));
     }
@@ -1310,6 +1454,7 @@ class PanelForm : Form
         {
             pageReady = true;
             SendList();
+            RefreshRemote();
             if (wantEditor) { wantEditor = false; SendEditor(null, null, null); }
         };
         using (Stream s = Assembly.GetExecutingAssembly().GetManifestResourceStream("panel.html"))
@@ -1324,7 +1469,14 @@ class PanelForm : Form
 
     public void SendList()
     {
-        Send(new { evt = "list", items = Store.List(), active = Wall.Active, startup = File.Exists(App.StartupLink()) });
+        Send(new { evt = "list", items = Store.List(), active = Wall.Active, startup = File.Exists(App.StartupLink()), fresh = Remote.Cache });
+    }
+
+    public async void RefreshRemote()
+    {
+        if (DateTime.UtcNow - Remote.Last < TimeSpan.FromMinutes(10)) return;
+        try { await Task.Run(() => Remote.Refresh()); } catch { }
+        if (!IsDisposed && pageReady) SendList();
     }
 
     async void RunImport(Func<string> f)
@@ -1414,6 +1566,8 @@ class PanelForm : Form
             using (FolderBrowserDialog d = new FolderBrowserDialog())
                 if (d.ShowDialog(this) == DialogResult.OK) { string p = d.SelectedPath; RunImport(() => Store.ImportPath(p, null)); }
         }
+        else if (cmd == "dl") RunImport(() => Remote.Download(id));
+        else if (cmd == "ignore") { Remote.Ignore(id); SendList(); }
         else if (cmd == "openDefaults")
         {
             Directory.CreateDirectory(Store.Defaults);
@@ -1479,6 +1633,19 @@ class TrayContext : ApplicationContext
         Maint.Dog.Tick += (s, e) => { try { Wall.Check(); } catch (Exception ex) { Maint.Log(ex); } };
         Maint.Dog.Start();
         tray.DoubleClick += (s, e) => ShowPanel();
+        tray.BalloonTipClicked += (s, e) => ShowPanel();
+        System.Windows.Forms.Timer rt = new System.Windows.Forms.Timer();
+        rt.Interval = 25000;
+        rt.Tick += (s, e) =>
+        {
+            rt.Interval = 30 * 60 * 1000;
+            ThreadPool.QueueUserWorkItem(st =>
+            {
+                Remote.Refresh();
+                try { sync.BeginInvoke(new Action(NotifyFresh)); } catch { }
+            });
+        };
+        rt.Start();
         msg.ShellRestarted += OnShellRestart;
         ThreadPool.RegisterWaitForSingleObject(showEvt, (st, to) =>
         {
@@ -1487,6 +1654,20 @@ class TrayContext : ApplicationContext
         string active = Store.Str(c, "active");
         if (active != null && Directory.Exists(Path.Combine(Store.Lib, active))) StartActive(active, silent ? 3 : 0);
         if (!silent) ShowPanel();
+    }
+
+    readonly HashSet<string> told = new HashSet<string>();
+
+    void NotifyFresh()
+    {
+        if (panel != null && !panel.IsDisposed && panel.Visible) { panel.SendList(); return; }
+        foreach (Dictionary<string, object> it in Remote.Cache)
+        {
+            string n = Store.Str(it, "id");
+            if (!told.Add(n)) continue;
+            tray.ShowBalloonTip(6000, "Novo wallpaper default", Store.Str(it, "name") + " — clique para abrir o painel e baixar.", ToolTipIcon.Info);
+            break;
+        }
     }
 
     void StartActive(string id, int minTicks)
@@ -1603,7 +1784,7 @@ static class Wv
 
 static class Maint
 {
-    public const string Current = "1.0.0";
+    public const string Current = "1.1.0";
     const string Repo = "joaoTYSM/lua-walpapers";
     public static System.Windows.Forms.Timer Dog;
 

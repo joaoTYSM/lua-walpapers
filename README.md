@@ -27,3 +27,9 @@ Live wallpaper engine for Windows 10/11. Wallpapers are HTML/JS pages, media fil
 Write Lua, press **Save** or **Save & Apply** (Ctrl+S saves). Syntax errors are shown before anything is saved. Defaults are read-only; saving one creates a copy.
 
 See `CREATORS_2.0.md` for the full wallpaper and Lua API.
+
+## 1.1.0
+
+- **Loading video.** `loading-bg.mp4` (repo root) plays while Windows is starting and whenever a wallpaper is loading. It is streamed from `raw.githubusercontent.com`, never saved. Disable with `"loadingVideo": false` in `config.json`.
+- **Previews.** Each default folder can have `p.png` or `p.gif`. The panel loads it from raw, it is never downloaded.
+- **New defaults.** A new folder in `defaults/` on GitHub shows up in the panel (and as a tray notification) with a **Baixar** button.

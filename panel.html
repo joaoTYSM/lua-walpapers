@@ -55,6 +55,14 @@ main{padding:28px 32px;display:grid;grid-template-columns:repeat(auto-fill,minma
 .sw span:after{content:"";position:absolute;width:18px;height:18px;left:3px;top:3px;border-radius:50%;background:#fff;transition:.2s}
 .sw input:checked+span{background:linear-gradient(135deg,var(--a),var(--b))}
 .sw input:checked+span:after{transform:translateX(20px)}
+#nw{padding:20px 32px 0;display:grid;gap:14px}
+#nw:empty{display:none}
+.nc{display:flex;gap:16px;align-items:center;border:1px solid var(--a);border-radius:20px;padding:12px;background:linear-gradient(120deg,rgba(182,168,255,.18),rgba(255,255,255,.03));box-shadow:0 0 40px rgba(182,168,255,.2)}
+.nc .nt{width:200px;aspect-ratio:16/9;border-radius:14px;overflow:hidden;position:relative;flex:none;background:rgba(255,255,255,.06);display:grid;place-items:center;font-size:34px;font-weight:700}
+.nc .nt img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.nc .nb{flex:1;min-width:0}.nc .nk{font-size:11px;letter-spacing:.12em;color:var(--a);font-weight:700}
+.nc .nm{font-size:17px;font-weight:600;margin:2px 0}.nc .ds{color:var(--mut);font-size:13px}
+.nc .row{display:flex;gap:8px;flex:none}
 #toast{position:fixed;bottom:24px;left:50%;transform:translate(-50%,160%);background:#3a1220;border:1px solid #ff6b81;padding:12px 20px;border-radius:14px;transition:.3s;z-index:20;max-width:70%}
 #toast.o{transform:translate(-50%,0)}
 .empty{grid-column:1/-1;text-align:center;color:var(--mut);padding:80px 0}
@@ -99,6 +107,7 @@ main{grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:26px}
 <div class="tg" style="gap:8px;color:var(--mut)">Start with Windows<label class="sw"><input type="checkbox" id="st"><span></span></label></div>
 <button class="btn d" id="sp">Stop</button>
 </header>
+<section id="nw"></section>
 <main id="g"></main>
 <aside id="dr">
 <div id="dh"><span id="dt"></span><button class="btn" id="dx">&#10005;</button></div>
@@ -120,7 +129,8 @@ function render() {
     const hue = [...it.name].reduce((a, c) => a + c.charCodeAt(0), 0) % 360;
     const on = it.id === S.active;
     const live = (it.kind === 'web' || it.kind === 'lua') && it.entry;
-    const media = live ? `<iframe class="pv" data-src="${it.entry}" sandbox="allow-scripts allow-same-origin" loading="lazy" tabindex="-1"></iframe>` : it.thumb ? (it.thumbVideo ? `<video src="${it.thumb}" muted loop autoplay></video>` : `<img src="${it.thumb}">`) : '';
+    const L = esc(it.name[0].toUpperCase());
+    const media = it.pv ? `<img src="${it.pv}.png" data-l="${L}" onerror="if(!this.dataset.g){this.dataset.g=1;this.src='${it.pv}.gif'}else{this.parentElement.prepend(this.dataset.l);this.remove()}">` : live ? `<iframe class="pv" data-src="${it.entry}" sandbox="allow-scripts allow-same-origin" loading="lazy" tabindex="-1"></iframe>` : it.thumb ? (it.thumbVideo ? `<video src="${it.thumb}" muted loop autoplay></video>` : `<img src="${it.thumb}">`) : '';
     return `<div class="card ${on ? 'on' : ''}"><div class="th" style="--h:${hue}">${media ? '' : esc(it.name[0].toUpperCase())}${media}<div class="tags"><span class="tag">${esc(it.kind.toUpperCase())}</span>${it.lua ? '<span class="tag">LUA</span>' : ''}${on ? '<span class="tag">ACTIVE</span>' : ''}</div></div><div class="in"><div class="nm">${esc(it.name)}</div><div class="row"><button class="btn p" data-a="apply" data-id="${it.id}">Apply</button><button class="btn" data-a="custom" data-id="${it.id}">Customize</button>${it.lua ? `<button class="btn" data-a="code" data-id="${it.id}">Code</button>` : ''}${it.locked ? '' : `<button class="btn d" data-a="rm" data-id="${it.id}">&#10005;</button>`}</div></div></div>`;
   }).join('');
   if (busy) h += skel(1);
@@ -131,6 +141,15 @@ function render() {
     if (!f) return;
     c.onmouseenter = () => { f.onload = () => f.classList.add('on'); f.src = f.dataset.src; };
     c.onmouseleave = () => { f.classList.remove('on'); f.removeAttribute('src'); };
+  });
+}
+
+function renderNew() {
+  const n = (S.fresh || []);
+  $('#nw').innerHTML = n.map(it => `<div class="nc"><div class="nt"><img src="${it.pv}.png" data-l="${esc(it.name[0].toUpperCase())}" onerror="if(!this.dataset.g){this.dataset.g=1;this.src='${it.pv}.gif'}else{this.parentElement.prepend(this.dataset.l);this.remove()}"></div><div class="nb"><div class="nk">NEW DEFAULT</div><div class="nm">${esc(it.name)}</div><div class="ds">${esc(it.desc)}</div></div><div class="row"><button class="btn p" data-n="dl" data-id="${esc(it.id)}">Baixar</button><button class="btn" data-n="ig" data-id="${esc(it.id)}">Ignorar</button></div></div>`).join('');
+  $('#nw').querySelectorAll('button').forEach(b => b.onclick = () => {
+    if (b.dataset.n === 'dl') { b.textContent = 'Baixando...'; b.disabled = true; send({ cmd: 'dl', id: b.dataset.id }); }
+    else send({ cmd: 'ignore', id: b.dataset.id });
   });
 }
 
@@ -255,7 +274,7 @@ $('#ec').addEventListener('keydown', e => {
 
 chrome.webview.addEventListener('message', e => {
   const m = e.data;
-  if (m.evt === 'list') { S = m; $('#st').checked = m.startup; render(); }
+  if (m.evt === 'list') { S = m; $('#st').checked = m.startup; render(); renderNew(); }
   if (m.evt === 'busy') { busy = m.on; render(); }
   if (m.evt === 'error') toast(m.msg);
   if (m.evt === 'luaEditor') openEd(m);
