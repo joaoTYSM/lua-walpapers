@@ -73,6 +73,7 @@ static class Native
 
 static class J
 {
+    public static object Any(string s) { return S.DeserializeObject(s); }
     static readonly JavaScriptSerializer S = new JavaScriptSerializer { MaxJsonLength = int.MaxValue };
     public static string To(object o) { return S.Serialize(o); }
     public static Dictionary<string, object> Obj(string s) { return S.DeserializeObject(s) as Dictionary<string, object>; }
@@ -107,6 +108,40 @@ window.luaMsg=function(d){if(d&&d.gfx)return run(d.gfx);if(d&&d.print!==undefine
     public static bool ValidId(string id)
     {
         return !string.IsNullOrEmpty(id) && id == Path.GetFileName(id) && id != "." && id != "..";
+    }
+
+    public static string[] Permissions(string dir)
+    {
+        List<string> r = new List<string>();
+        Dictionary<string, object> info = Read(Path.Combine(dir, "info.json"));
+        if (info.ContainsKey("permissions") && info["permissions"] is object[])
+        {
+            foreach (object o in (object[])info["permissions"])
+            {
+                string v = o as string;
+                if ((v == "files" || v == "exec") && !r.Contains(v)) r.Add(v);
+            }
+        }
+        return r.ToArray();
+    }
+
+    public static string[] Granted(string id, string dir)
+    {
+        string[] want = Permissions(dir);
+        if (want.Length == 0) return want;
+        Dictionary<string, object> c = Cfg();
+        Dictionary<string, object> g = c.ContainsKey("granted") ? c["granted"] as Dictionary<string, object> : null;
+        if (g == null) g = new Dictionary<string, object>();
+        string key = id + ":" + string.Join(",", want);
+        if (g.ContainsKey(key)) return (g[key] is bool && (bool)g[key]) ? want : new string[0];
+        string what = "";
+        foreach (string w in want) what += (w == "files" ? "  - files: read and write any file your account can access\n" : "  - exec: open programs, links and read environment variables\n");
+        DialogResult dr = MessageBox.Show("The wallpaper \"" + id + "\" asks for extra access:\n\n" + what + "\nOnly allow this for wallpapers you trust.", "lua_walpapers", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
+        bool ok = dr == DialogResult.Yes;
+        g[key] = ok;
+        c["granted"] = g;
+        SaveCfg(c);
+        return ok ? want : new string[0];
     }
 
     public static Dictionary<string, object> Settings(string dir)
@@ -628,7 +663,7 @@ static class App
     public static Task<CoreWebView2Environment> Env()
     {
         if (env == null)
-            env = CoreWebView2Environment.CreateAsync(null, Path.Combine(Path.GetTempPath(), fallback == 0 ? "lua_walpapersWV2" : "lua_walpapersWV2_" + fallback), new CoreWebView2EnvironmentOptions("--autoplay-policy=no-user-gesture-required"));
+            env = CoreWebView2Environment.CreateAsync(null, Path.Combine(Store.Root, fallback == 0 ? "webview" : "webview_" + fallback), new CoreWebView2EnvironmentOptions(Wv.Args));
         return env;
     }
 
@@ -740,6 +775,245 @@ static class MouseHook
     }
 }
 
+static class MediaBridge
+{
+    public static event Action<string> Updated;
+    static readonly object gate = new object();
+    static Process proc;
+    static Thread th;
+    static volatile bool stop;
+    static bool started;
+    static string lastTrack, lastCover, lastLyrics, lastPos, lastNone, lyricKey;
+
+    const string PsSource = @"param($ppid)
+$ErrorActionPreference = 'SilentlyContinue'
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+Add-Type -AssemblyName System.Runtime.WindowsRuntime
+$asTask = ([System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object { $_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 -and $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation`1' })[0]
+function Await($op, $type) {
+  $t = $asTask.MakeGenericMethod($type).Invoke($null, @($op))
+  [void]$t.Wait(-1)
+  $t.Result
+}
+[void][Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager, Windows.Media.Control, ContentType = WindowsRuntime]
+[void][Windows.Media.Control.GlobalSystemMediaTransportControlsSessionMediaProperties, Windows.Media.Control, ContentType = WindowsRuntime]
+[void][Windows.Storage.Streams.IRandomAccessStreamWithContentType, Windows.Storage.Streams, ContentType = WindowsRuntime]
+$mgr = Await ([Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager]::RequestAsync()) ([Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager])
+function Emit($o) { [Console]::Out.WriteLine(($o | ConvertTo-Json -Compress -Depth 4)); [Console]::Out.Flush() }
+function GetCover($props) {
+  try {
+    $ref = $props.Thumbnail
+    if ($ref -eq $null) { return '' }
+    $st = Await ($ref.OpenReadAsync()) ([Windows.Storage.Streams.IRandomAccessStreamWithContentType])
+    $net = [System.IO.WindowsRuntimeStreamExtensions]::AsStreamForRead($st)
+    $ms = New-Object System.IO.MemoryStream
+    $net.CopyTo($ms)
+    $mime = $st.ContentType
+    if (-not $mime) { $mime = 'image/jpeg' }
+    return 'data:' + $mime + ';base64,' + [Convert]::ToBase64String($ms.ToArray())
+  } catch { return '' }
+}
+$lastKey = ''
+$pending = $false
+$none = $false
+while ($true) {
+  if (-not (Get-Process -Id $ppid -ErrorAction SilentlyContinue)) { break }
+  try {
+    $s = $null
+    foreach ($x in $mgr.GetSessions()) { if ($x.SourceAppUserModelId -match 'spotify') { $s = $x; break } }
+    if ($s -eq $null) { $s = $mgr.GetCurrentSession() }
+    if ($s -eq $null) {
+      if (-not $none) { Emit ([ordered]@{ type = 'none' }); $none = $true; $lastKey = '' }
+    } else {
+      $none = $false
+      $props = Await ($s.TryGetMediaPropertiesAsync()) ([Windows.Media.Control.GlobalSystemMediaTransportControlsSessionMediaProperties])
+      $tl = $s.GetTimelineProperties()
+      $playing = ([int]$s.GetPlaybackInfo().PlaybackStatus -eq 4)
+      $pos = $tl.Position.TotalSeconds
+      if ($playing) { $pos += ([DateTimeOffset]::UtcNow - $tl.LastUpdatedTime).TotalSeconds }
+      $dur = $tl.EndTime.TotalSeconds
+      $key = '' + $props.Artist + '|' + $props.Title
+      if ($key -ne $lastKey) {
+        $lastKey = $key
+        $cover = GetCover $props
+        $pending = ($cover -eq '')
+        Emit ([ordered]@{ type = 'track'; title = '' + $props.Title; artist = '' + $props.Artist; album = '' + $props.AlbumTitle; app = '' + $s.SourceAppUserModelId; duration = $dur; pos = $pos; playing = $playing; cover = $cover })
+      } elseif ($pending) {
+        $cover = GetCover $props
+        if ($cover -ne '') { $pending = $false; Emit ([ordered]@{ type = 'cover'; cover = $cover }) }
+      }
+      Emit ([ordered]@{ type = 'pos'; pos = $pos; duration = $dur; playing = $playing })
+    }
+  } catch {}
+  Start-Sleep -Milliseconds 500
+}
+";
+
+    public static void Start()
+    {
+        lock (gate)
+        {
+            if (started) return;
+            Dictionary<string, object> c = Store.Cfg();
+            if (c.ContainsKey("spotify") && c["spotify"] is bool && !(bool)c["spotify"]) return;
+            started = true;
+        }
+        th = new Thread(Loop);
+        th.IsBackground = true;
+        th.Name = "lua_walpapers_media";
+        th.Start();
+    }
+
+    public static void Stop()
+    {
+        stop = true;
+        try { if (proc != null && !proc.HasExited) proc.Kill(); } catch { }
+    }
+
+    public static List<string> Snapshot()
+    {
+        List<string> r = new List<string>();
+        lock (gate)
+        {
+            if (lastNone != null) { r.Add(lastNone); return r; }
+            if (lastTrack != null) r.Add(lastTrack);
+            if (lastCover != null) r.Add(lastCover);
+            if (lastLyrics != null) r.Add(lastLyrics);
+            if (lastPos != null) r.Add(lastPos);
+        }
+        return r;
+    }
+
+    static void Raise(string json)
+    {
+        Action<string> h = Updated;
+        if (h != null) h(json);
+    }
+
+    static void Loop()
+    {
+        string path = Path.Combine(Store.Root, "media.ps1");
+        try
+        {
+            Directory.CreateDirectory(Store.Root);
+            File.WriteAllText(path, PsSource, new UTF8Encoding(true));
+        }
+        catch (Exception ex) { Maint.Log(ex); return; }
+        while (!stop)
+        {
+            try
+            {
+                ProcessStartInfo psi = new ProcessStartInfo("powershell.exe", "-NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File \"" + path + "\" " + Process.GetCurrentProcess().Id);
+                psi.UseShellExecute = false;
+                psi.CreateNoWindow = true;
+                psi.RedirectStandardOutput = true;
+                psi.StandardOutputEncoding = Encoding.UTF8;
+                Process p = Process.Start(psi);
+                proc = p;
+                string line;
+                while ((line = p.StandardOutput.ReadLine()) != null) Handle(line);
+                try { p.WaitForExit(1000); } catch { }
+            }
+            catch (Exception ex) { Maint.Log(ex); }
+            for (int i = 0; i < 20 && !stop; i++) Thread.Sleep(250);
+        }
+    }
+
+    static void Handle(string line)
+    {
+        line = line.Trim().TrimStart('\uFEFF');
+        if (line.Length < 2 || line[0] != '{') return;
+        Dictionary<string, object> o = null;
+        try { o = J.Obj(line); } catch { }
+        if (o == null) return;
+        string type = Store.Str(o, "type");
+        if (type == "track")
+        {
+            string artist = Store.Str(o, "artist") ?? "";
+            string title = Store.Str(o, "title") ?? "";
+            double dur = 0;
+            try { dur = Convert.ToDouble(o["duration"], CultureInfo.InvariantCulture); } catch { }
+            string key = artist + "|" + title;
+            lock (gate)
+            {
+                lastNone = null; lastTrack = line; lastCover = null; lastLyrics = null; lastPos = null; lyricKey = key;
+            }
+            Raise(line);
+            ThreadPool.QueueUserWorkItem(x => FetchLyrics(key, artist, title, dur));
+        }
+        else if (type == "cover") { lock (gate) { lastCover = line; } Raise(line); }
+        else if (type == "pos") { lock (gate) { lastPos = line; } Raise(line); }
+        else if (type == "none")
+        {
+            lock (gate) { lastTrack = null; lastCover = null; lastLyrics = null; lastPos = null; lastNone = line; lyricKey = null; }
+            Raise(line);
+        }
+    }
+
+    static string Get(string url)
+    {
+        try
+        {
+            ServicePointManager.SecurityProtocol = (SecurityProtocolType)3072;
+            using (WebClient wc = new WebClient())
+            {
+                wc.Encoding = Encoding.UTF8;
+                wc.Headers[HttpRequestHeader.UserAgent] = "lua_walpapers/1.1";
+                return wc.DownloadString(url);
+            }
+        }
+        catch { return null; }
+    }
+
+    static List<object> Lrc(string artist, string title, double dur)
+    {
+        List<object> r = new List<object>();
+        string clean = Regex.Split(title, @" - | \(")[0];
+        string t = Get("https://lrclib.net/api/get?artist_name=" + Uri.EscapeDataString(artist) + "&track_name=" + Uri.EscapeDataString(title) + "&duration=" + ((int)dur).ToString(CultureInfo.InvariantCulture));
+        Dictionary<string, object> d = null;
+        try { if (t != null) d = J.Obj(t); } catch { }
+        string synced = d == null ? null : Store.Str(d, "syncedLyrics");
+        if (string.IsNullOrEmpty(synced))
+        {
+            string t2 = Get("https://lrclib.net/api/search?q=" + Uri.EscapeDataString(clean + " " + artist));
+            object[] arr = null;
+            try { if (t2 != null) arr = J.Any(t2) as object[]; } catch { }
+            if (arr != null)
+            {
+                foreach (object x in arr)
+                {
+                    Dictionary<string, object> xd = x as Dictionary<string, object>;
+                    if (xd == null) continue;
+                    string sl = Store.Str(xd, "syncedLyrics");
+                    if (!string.IsNullOrEmpty(sl)) { synced = sl; break; }
+                }
+            }
+        }
+        if (string.IsNullOrEmpty(synced)) return r;
+        foreach (string ln in synced.Split('\n'))
+        {
+            Match m = Regex.Match(ln.Trim(), @"^\[(\d+):(\d+(?:\.\d+)?)\](.*)$");
+            if (!m.Success) continue;
+            double ts = int.Parse(m.Groups[1].Value, CultureInfo.InvariantCulture) * 60 + double.Parse(m.Groups[2].Value, CultureInfo.InvariantCulture);
+            r.Add(new object[] { ts, m.Groups[3].Value.Trim() });
+        }
+        return r;
+    }
+
+    static void FetchLyrics(string key, string artist, string title, double dur)
+    {
+        List<object> lines = null;
+        try { lines = Lrc(artist, title, dur); } catch { }
+        string json = J.To(new Dictionary<string, object> { { "type", "lyrics" }, { "key", key }, { "lyrics", lines ?? new List<object>() } });
+        lock (gate)
+        {
+            if (lyricKey != key) return;
+            lastLyrics = json;
+        }
+        Raise(json);
+    }
+}
+
 class MsgForm : Form
 {
     readonly uint msg = Native.RegisterWindowMessage("TaskbarCreated");
@@ -787,6 +1061,9 @@ class LuaHost
     volatile bool stop;
     public volatile bool Paused;
     public volatile bool WantAudio;
+    readonly string dataDir;
+    readonly string[] perms;
+    int inflight;
 
     public static string Check(string code)
     {
@@ -795,10 +1072,12 @@ class LuaHost
         catch (Exception ex) { return ex.Message; }
     }
 
-    public LuaHost(string code, string name, Dictionary<string, object> settings, int w, int h, Action<string> emit, Action<string> exec)
+    public LuaHost(string code, string name, Dictionary<string, object> settings, int w, int h, Action<string> emit, Action<string> exec, string dataDir, string[] perms)
     {
         this.emit = emit;
         this.exec = exec;
+        this.dataDir = dataDir;
+        this.perms = perms ?? new string[0];
         sc = new Script(Mods);
         sc.Options.DebugPrint = s => Send(new Dictionary<string, object> { { "print", s } });
         Setup(settings, w, h);
@@ -814,7 +1093,7 @@ class LuaHost
     static bool Bool(CallbackArguments a, int i, bool d) { return a.Count > i && a[i].Type == DataType.Boolean ? a[i].Boolean : d; }
     static double R(double v) { return Math.Round(v, 1); }
 
-    void Gfx(params object[] c) { if (cmds.Count < 6000) cmds.Add(c); }
+    void Gfx(params object[] c) { if (cmds.Count < 30000) cmds.Add(c); }
 
     void Send(object o) { emit(J.To(o)); }
 
@@ -843,6 +1122,100 @@ class LuaHost
         sc.Globals.Set("js", Cb((c, a) => { if (a.Count > 0 && a[0].Type == DataType.String) exec(a[0].String); return DynValue.Nil; }));
         sc.Globals.Set("time", Cb((c, a) => DynValue.NewNumber(clock.Elapsed.TotalSeconds)));
         sc.Globals.Set("set_fps", Cb((c, a) => { fps = (int)Math.Max(1, Math.Min(120, Num(a, 0, 30))); return DynValue.Nil; }));
+
+        Table ht = new Table(sc);
+        ht.Set("get", Cb((c, a) => { Http("GET", Str(a, 0, ""), null, a.Count > 1 ? a[1] : DynValue.Nil); return DynValue.Nil; }));
+        ht.Set("post", Cb((c, a) => { Http("POST", Str(a, 0, ""), Str(a, 1, ""), a.Count > 2 ? a[2] : DynValue.Nil); return DynValue.Nil; }));
+        sc.Globals.Set("http", DynValue.NewTable(ht));
+
+        Table st = new Table(sc);
+        st.Set("get", Cb((c, a) =>
+        {
+            string f = DataFile(Str(a, 0, ""));
+            try { if (f != null && File.Exists(f)) return DynValue.NewString(File.ReadAllText(f)); } catch { }
+            return DynValue.Nil;
+        }));
+        st.Set("set", Cb((c, a) =>
+        {
+            string f = DataFile(Str(a, 0, ""));
+            string v = Str(a, 1, "");
+            if (f == null || v.Length > 1048576) return DynValue.False;
+            try { File.WriteAllText(f, v); return DynValue.True; } catch { return DynValue.False; }
+        }));
+        st.Set("delete", Cb((c, a) =>
+        {
+            string f = DataFile(Str(a, 0, ""));
+            try { if (f != null && File.Exists(f)) File.Delete(f); } catch { }
+            return DynValue.Nil;
+        }));
+        sc.Globals.Set("storage", DynValue.NewTable(st));
+
+        Table jt = new Table(sc);
+        jt.Set("encode", Cb((c, a) => DynValue.NewString(a.Count > 0 ? J.To(FromDyn(a[0], 0)) : "null")));
+        jt.Set("decode", Cb((c, a) =>
+        {
+            try { return ToDyn(J.Any(Str(a, 0, "null"))); } catch { return DynValue.Nil; }
+        }));
+        sc.Globals.Set("json", DynValue.NewTable(jt));
+
+        sc.Globals.Set("media", DynValue.NewTable(new Table(sc)));
+
+        if (Array.IndexOf(perms, "files") >= 0)
+        {
+            Table ft = new Table(sc);
+            ft.Set("read", Cb((c, a) =>
+            {
+                try { return DynValue.NewString(File.ReadAllText(Str(a, 0, ""))); } catch { return DynValue.Nil; }
+            }));
+            ft.Set("write", Cb((c, a) =>
+            {
+                try { File.WriteAllText(Str(a, 0, ""), Str(a, 1, "")); return DynValue.True; } catch { return DynValue.False; }
+            }));
+            ft.Set("exists", Cb((c, a) =>
+            {
+                string p = Str(a, 0, "");
+                return DynValue.NewBoolean(File.Exists(p) || Directory.Exists(p));
+            }));
+            ft.Set("list", Cb((c, a) =>
+            {
+                try
+                {
+                    Table t = new Table(sc);
+                    int i = 1;
+                    foreach (string e in Directory.GetFileSystemEntries(Str(a, 0, "."))) t.Set(i++, DynValue.NewString(Path.GetFileName(e)));
+                    return DynValue.NewTable(t);
+                }
+                catch { return DynValue.Nil; }
+            }));
+            sc.Globals.Set("fs", DynValue.NewTable(ft));
+        }
+
+        if (Array.IndexOf(perms, "exec") >= 0)
+        {
+            Table sy = new Table(sc);
+            sy.Set("open", Cb((c, a) =>
+            {
+                try { Process.Start(Str(a, 0, "")); return DynValue.True; } catch { return DynValue.False; }
+            }));
+            sy.Set("run", Cb((c, a) =>
+            {
+                try
+                {
+                    ProcessStartInfo psi = new ProcessStartInfo(Str(a, 0, ""), Str(a, 1, ""));
+                    psi.UseShellExecute = false;
+                    psi.CreateNoWindow = true;
+                    Process.Start(psi);
+                    return DynValue.True;
+                }
+                catch { return DynValue.False; }
+            }));
+            sy.Set("env", Cb((c, a) =>
+            {
+                string v = Environment.GetEnvironmentVariable(Str(a, 0, ""));
+                return v == null ? DynValue.Nil : DynValue.NewString(v);
+            }));
+            sc.Globals.Set("sys", DynValue.NewTable(sy));
+        }
         sc.Globals.Set("sleep", Cb((c, a) =>
         {
             int end = Environment.TickCount + (int)Math.Max(0, Num(a, 0, 10));
@@ -991,6 +1364,84 @@ class LuaHost
         }
     }
 
+    string DataFile(string key)
+    {
+        if (string.IsNullOrEmpty(dataDir) || string.IsNullOrEmpty(key)) return null;
+        StringBuilder sb = new StringBuilder();
+        foreach (char ch in key) sb.Append(char.IsLetterOrDigit(ch) || ch == '-' || ch == '_' ? ch : '_');
+        if (sb.Length > 80) sb.Length = 80;
+        try { Directory.CreateDirectory(dataDir); } catch { return null; }
+        return Path.Combine(dataDir, sb.ToString() + ".txt");
+    }
+
+    void CallCb(DynValue f, params DynValue[] args)
+    {
+        try { sc.Call(f, args); }
+        catch (InterpreterException ex) { Report(ex.DecoratedMessage ?? ex.Message); }
+    }
+
+    void Http(string method, string url, string body, DynValue cb)
+    {
+        if (!(url.StartsWith("http://", StringComparison.OrdinalIgnoreCase) || url.StartsWith("https://", StringComparison.OrdinalIgnoreCase))) return;
+        if (inflight >= 8) return;
+        Interlocked.Increment(ref inflight);
+        ThreadPool.QueueUserWorkItem(o =>
+        {
+            int status = 0;
+            string text = "";
+            try
+            {
+                ServicePointManager.SecurityProtocol = (SecurityProtocolType)3072;
+                using (WebClient wc = new WebClient())
+                {
+                    wc.Encoding = Encoding.UTF8;
+                    wc.Headers[HttpRequestHeader.UserAgent] = "lua_walpapers";
+                    if (method == "GET") text = wc.DownloadString(url);
+                    else
+                    {
+                        string b = body ?? "";
+                        wc.Headers[HttpRequestHeader.ContentType] = b.StartsWith("{") || b.StartsWith("[") ? "application/json" : "application/x-www-form-urlencoded";
+                        text = wc.UploadString(url, "POST", b);
+                    }
+                    status = 200;
+                }
+            }
+            catch (WebException ex)
+            {
+                HttpWebResponse r = ex.Response as HttpWebResponse;
+                status = r != null ? (int)r.StatusCode : 0;
+                text = ex.Message;
+            }
+            catch (Exception ex) { text = ex.Message; }
+            Interlocked.Decrement(ref inflight);
+            if (cb == null || (cb.Type != DataType.Function && cb.Type != DataType.ClrFunction)) return;
+            lock (qk) q.Enqueue(() => CallCb(cb, DynValue.NewNumber(status), DynValue.NewString(text)));
+        });
+    }
+
+    public void MediaEvent(string json)
+    {
+        lock (qk) q.Enqueue(() =>
+        {
+            Dictionary<string, object> o = null;
+            try { o = J.Obj(json); } catch { }
+            if (o == null) return;
+            string type = Store.Str(o, "type");
+            o.Remove("cover");
+            if (type == "none") sc.Globals.Set("media", DynValue.NewTable(new Table(sc)));
+            else if (type == "track") sc.Globals.Set("media", ToDyn(o));
+            else if (type == "pos" || type == "lyrics")
+            {
+                DynValue m = sc.Globals.Get("media");
+                if (m.Type == DataType.Table)
+                    foreach (KeyValuePair<string, object> kv in o)
+                        if (kv.Key != "type" && kv.Key != "key") m.Table.Set(kv.Key, ToDyn(kv.Value));
+            }
+            else return;
+            Safe("on_media", DynValue.NewString(type ?? ""), ToDyn(o));
+        });
+    }
+
     public void Message(string s)
     {
         lock (qk) q.Enqueue(() => Safe("on_message", DynValue.NewString(s ?? "")));
@@ -1090,6 +1541,8 @@ class WallpaperForm : Form
         watch.Start();
         pump.Start();
         MouseHook.Start(OnMouse);
+        MediaBridge.Updated += OnMedia;
+        MediaBridge.Start();
         Microsoft.Win32.SystemEvents.DisplaySettingsChanged += OnDisplay;
         Init();
     }
@@ -1144,6 +1597,12 @@ class WallpaperForm : Form
         try { web.DefaultBackgroundColor = Color.FromArgb(7, 7, 15); } catch { }
         c.Settings.AreDefaultContextMenusEnabled = false;
         c.Settings.AreDevToolsEnabled = false;
+        c.PermissionRequested += (s, e) => { e.State = CoreWebView2PermissionState.Allow; };
+        c.NewWindowRequested += (s, e) =>
+        {
+            e.Handled = true;
+            try { if (e.Uri.StartsWith("http://", StringComparison.OrdinalIgnoreCase) || e.Uri.StartsWith("https://", StringComparison.OrdinalIgnoreCase)) Process.Start(e.Uri); } catch { }
+        };
         c.ProcessFailed += (s, e) =>
         {
             try { BeginInvoke(new Action(() => { string id = target; Wall.Halt(); Wall.Retry(id); })); } catch { }
@@ -1159,6 +1618,7 @@ class WallpaperForm : Form
             StartLua();
             PushAll();
             StartAudio();
+            PushMedia();
         };
         LoadWp(target);
     }
@@ -1201,7 +1661,7 @@ class WallpaperForm : Form
         string path = Path.Combine(curDir, script);
         if (!File.Exists(path)) return;
         Rectangle b = Screen.PrimaryScreen.Bounds;
-        lua = new LuaHost(File.ReadAllText(path), script, Store.Settings(curDir), b.Width, b.Height, LuaLine, RunJs);
+        lua = new LuaHost(File.ReadAllText(path), script, Store.Settings(curDir), b.Width, b.Height, LuaLine, RunJs, Path.Combine(Store.Root, "data", cur), Store.Granted(cur, curDir));
         lua.Paused = paused;
     }
 
@@ -1214,6 +1674,26 @@ class WallpaperForm : Form
     void RunJs(string js)
     {
         try { BeginInvoke(new Action(() => { if (web.CoreWebView2 != null) web.CoreWebView2.ExecuteScriptAsync(js); })); } catch { }
+    }
+
+    void OnMedia(string json)
+    {
+        try { BeginInvoke(new Action(() => DeliverMedia(json))); } catch { }
+    }
+
+    void DeliverMedia(string json)
+    {
+        if (closing || !ready) return;
+        if (paused && json.StartsWith("{\"type\":\"pos\"")) return;
+        LuaHost l = lua;
+        if (l != null) l.MediaEvent(json);
+        if (web.CoreWebView2 != null)
+            web.CoreWebView2.ExecuteScriptAsync("(function(d){window.dispatchEvent(new CustomEvent('host-media',{detail:d}));if(window.hostMedia)hostMedia(d);})(" + json + ")");
+    }
+
+    void PushMedia()
+    {
+        foreach (string j in MediaBridge.Snapshot()) DeliverMedia(j);
     }
 
     void StopLua()
@@ -1396,6 +1876,7 @@ class WallpaperForm : Form
         watch.Stop();
         pump.Stop();
         MouseHook.Stop();
+        MediaBridge.Updated -= OnMedia;
         Microsoft.Win32.SystemEvents.DisplaySettingsChanged -= OnDisplay;
         StopLua();
         try { if (capture != null) { capture.StopRecording(); capture.Dispose(); } } catch { }
@@ -1739,6 +2220,7 @@ static class Program
         Native.SetProcessDPIAware();
         Application.EnableVisualStyles();
         Application.Run(new TrayContext(show, args.Contains("--silent")));
+        MediaBridge.Stop();
         GC.KeepAlive(mutex);
     }
 }
@@ -1746,6 +2228,8 @@ static class Program
 
 static class Wv
 {
+    public const string Args = "--autoplay-policy=no-user-gesture-required --disable-web-security --allow-file-access-from-files --allow-running-insecure-content --disable-site-isolation-trials --disable-features=BlockInsecurePrivateNetworkRequests,PrivateNetworkAccessSendPreflights,PrivateNetworkAccessRespectPreflightResults";
+
     public static async Task<bool> Ensure(Control host, Func<WebView2> get, Action<WebView2> set)
     {
         for (int i = 0; i < 6; i++)
