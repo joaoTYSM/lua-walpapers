@@ -44,6 +44,7 @@ Define any of these globals in your page:
 | `hostAudio(bins)` | system audio, 128 values in 0..1, about 47 times per second |
 | `hostMouse(x, y, type, buttons)` | desktop mouse, `x`/`y` normalized 0..1 from the top-left, `type` is `move`, `down` or `up`, `buttons` is a bitmask (1 left, 2 right, 4 middle) |
 | `wallpaperPlaybackChanged('{"IsPaused":true}')` | paused while a window covers the desktop |
+| `hostMedia(data)` and the `host-media` event | Spotify / system media info, see section 3.1 |
 | `luaMsg(data)` and the `lua-msg` event | message sent from Lua with `send()` |
 | `host-mouse` event | same data as `hostMouse`, in `event.detail` |
 
@@ -54,6 +55,35 @@ Send text to Lua from the page:
 ```js
 chrome.webview.postMessage('hello');
 ```
+
+### 3.1 Freedom for web wallpapers
+
+Web wallpapers run with relaxed browser security, so they can do almost anything a normal web page can:
+
+- `fetch`, `XMLHttpRequest` and `WebSocket` to any site or local server, with no CORS or mixed-content blocking.
+- Microphone, camera, geolocation, clipboard and notification permissions are granted automatically.
+- `localStorage` and IndexedDB are kept between reboots (stored in `%APPDATA%\lua_walpapers\webview`).
+- Links that try to open a new window open in the default browser (http and https only).
+
+### 3.2 Media (Spotify and any Windows media player)
+
+The app reads the current track from Windows (the Spotify desktop app is preferred, otherwise the active media session) and sends it to the wallpaper. Synced lyrics come from LRCLIB and are sent when found. Disable everything with `"spotify": false` in `config.json`.
+
+```js
+window.hostMedia = function (m) {
+  // m.type is "track", "cover", "lyrics", "pos" or "none"
+};
+```
+
+| `type` | Fields |
+| --- | --- |
+| `track` | `title`, `artist`, `album`, `app`, `duration` (s), `pos` (s), `playing`, `cover` (data URL, may be empty) |
+| `cover` | `cover`, sent later when the cover was not ready with `track` |
+| `lyrics` | `lyrics`: list of `[seconds, "line"]`, empty when none were found |
+| `pos` | `pos`, `duration`, `playing`, about twice per second |
+| `none` | nothing is playing |
+
+The last known state is replayed when the wallpaper loads.
 
 ## 4. Lua API
 
@@ -79,10 +109,39 @@ function on_tick(dt) end                    -- every frame, dt in seconds
 function on_mouse(x, y, ev, buttons) end    -- pixels; ev = "move" | "down" | "up"
 function on_audio(bins) end                 -- bins[1..128], 0..1
 function on_property(name, value) end
+function on_media(kind, data) end           -- kind = "track" | "pos" | "lyrics" | "none"
 function on_message(text) end               -- from chrome.webview.postMessage
 ```
 
 `buttons % 2 == 1` means the left button is held.
+
+### Extra Lua APIs
+
+| Name | Description |
+| --- | --- |
+| `http.get(url, cb)` | async GET, `cb(status, body)` runs on the Lua thread (`status` is 0 on network errors) |
+| `http.post(url, body, cb)` | async POST, JSON bodies get `application/json` |
+| `storage.get(key)`, `storage.set(key, value)`, `storage.delete(key)` | persistent text storage per wallpaper (1 MB per key) |
+| `json.encode(value)`, `json.decode(text)` | JSON conversion |
+| `media` | table with the current track (`title`, `artist`, `album`, `duration`, `pos`, `playing`, `lyrics`) |
+| `gfx` | the command limit per tick is now 30000 |
+
+### Permissions
+
+Two more APIs exist but need the user to approve them. Declare them in `info.json`:
+
+```json
+{ "Title": "My Wallpaper", "permissions": ["files", "exec"] }
+```
+
+The first time the wallpaper starts, Windows shows a prompt listing what it asks for. The answer is remembered.
+
+| Permission | API |
+| --- | --- |
+| `files` | `fs.read(path)`, `fs.write(path, text)`, `fs.exists(path)`, `fs.list(dir)` on any path the user can access |
+| `exec` | `sys.open(urlOrPath)`, `sys.run(exe, args)`, `sys.env(name)` |
+
+Compiled and obfuscated Lua are still rejected.
 
 ### Drawing with `gfx` (Lua wallpapers without HTML)
 
